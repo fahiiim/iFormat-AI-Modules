@@ -40,8 +40,12 @@ class AIResponse(AISchema):
 
 
 class ScreeningRequest(AISchema):
-    """Candidate CV and job description to compare."""
+    """Backend candidate data, CV content, and job description to compare."""
 
+    user_info: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Authoritative candidate profile supplied by the backend.",
+    )
     cv_json: dict[str, Any] = Field(min_length=1)
     job_description: str = Field(min_length=1, max_length=50_000)
 
@@ -216,18 +220,29 @@ class ResumeOptimizerAIResponse(AIResponse):
 
 
 class CVBuilderRequest(AISchema):
-    """Unstructured notes from which to assemble a CV."""
+    """Backend profile data and user notes from which to assemble a CV."""
 
+    user_info: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Authoritative user profile supplied by the backend.",
+    )
     raw_notes: str = Field(min_length=1, max_length=100_000)
 
 
 class CVBuilderResponse(AIResponse):
-    """Normalized CV sections and usage metadata."""
+    """Normalized CV sections, an ATS PDF, and usage metadata."""
 
     personal: dict[str, Any]
     experiences: list[dict[str, Any]] = Field(default_factory=list)
     education: list[dict[str, Any]] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    file_name: str = Field(alias="fileName", min_length=1)
+    content_type: str = Field(alias="contentType", default="application/pdf")
+    pdf_base64: str = Field(
+        alias="pdfBase64",
+        min_length=1,
+        description="Base64-encoded ATS-friendly CV PDF.",
+    )
 
 
 class ProductRecommenderRequest(AISchema):

@@ -26,7 +26,6 @@ from app.schemas.ai_schemas import (
     CoverLetterRequest,
     CoverLetterResponse,
     CVBuilderRequest,
-    CVBuilderResponse,
     ProductRecommenderRequest,
     ProductRecommenderResponse,
     ResumeOptimizerAIResponse,
@@ -214,6 +213,7 @@ class BedrockService:
         """Score a candidate CV against a job description."""
 
         user_prompt = SCREENING_USER_PROMPT.format(
+            user_info=self._json(request.user_info),
             cv_json=self._json(request.cv_json),
             job_description=request.job_description,
         )
@@ -291,11 +291,14 @@ class BedrockService:
         )
 
     async def build_cv(self, request: CVBuilderRequest) -> dict[str, Any]:
-        """Normalize unstructured notes into CV sections."""
+        """Merge backend profile data and notes into ATS resume sections."""
 
-        user_prompt = CV_BUILDER_USER_PROMPT.format(raw_notes=request.raw_notes)
+        user_prompt = CV_BUILDER_USER_PROMPT.format(
+            user_info=self._json(request.user_info),
+            raw_notes=request.raw_notes,
+        )
         return await self._invoke_for_contract(
-            CVBuilderResponse,
+            ResumeOptimizerAIResponse,
             CV_BUILDER_SYSTEM_PROMPT,
             user_prompt,
         )

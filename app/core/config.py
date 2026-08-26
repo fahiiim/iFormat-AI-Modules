@@ -17,10 +17,7 @@ class Settings(BaseSettings):
 
     AWS_REGION: str = Field(default="eu-west-1", min_length=1)
     BEDROCK_MODEL_ID: str = Field(
-        default=(
-            "arn:aws:bedrock:eu-west-1:952409747578:inference-profile/"
-            "eu.anthropic.claude-opus-5"
-        ),
+        default="zai.glm-4.7-flash",
         min_length=1,
     )
     EMBEDDING_MODEL_ID: str = Field(

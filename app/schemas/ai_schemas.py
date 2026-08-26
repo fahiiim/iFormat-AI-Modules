@@ -83,9 +83,8 @@ class ColdEmailResponse(AIResponse):
 
 
 class ResumeOptimizerRequest(AISchema):
-    """Raw resume content and the desired target market."""
+    """Targeting metadata submitted alongside a resume PDF upload."""
 
-    raw_text: str = Field(alias="rawText", min_length=1, max_length=100_000)
     target_role: str = Field(alias="targetRole", min_length=1, max_length=300)
     target_industry: str = Field(
         alias="targetIndustry",
@@ -95,9 +94,68 @@ class ResumeOptimizerRequest(AISchema):
 
 
 class ResumeOptimizerResponse(AIResponse):
-    """ATS-optimized resume text and usage metadata."""
+    """Generated resume PDF payload and usage metadata."""
 
     summary: str = Field(min_length=1)
+    file_name: str = Field(alias="fileName", min_length=1)
+    content_type: str = Field(alias="contentType", default="application/pdf")
+    pdf_base64: str = Field(
+        alias="pdfBase64",
+        min_length=1,
+        description="Base64-encoded optimized resume PDF.",
+    )
+
+
+class ResumePersonalDetails(AISchema):
+    """Contact and identity details extracted from the uploaded resume."""
+
+    name: str = ""
+    headline: str = ""
+    email: str = ""
+    phone: str = ""
+    location: str = ""
+    links: list[str] = Field(default_factory=list)
+
+
+class ResumeExperience(AISchema):
+    """One normalized work-experience entry."""
+
+    title: str = ""
+    company: str = ""
+    location: str = ""
+    start_date: str = Field(alias="startDate", default="")
+    end_date: str = Field(alias="endDate", default="")
+    bullets: list[str] = Field(default_factory=list)
+
+
+class ResumeEducation(AISchema):
+    """One normalized education entry."""
+
+    qualification: str = ""
+    institution: str = ""
+    location: str = ""
+    completion_date: str = Field(alias="completionDate", default="")
+    details: list[str] = Field(default_factory=list)
+
+
+class ResumeProject(AISchema):
+    """One normalized project entry."""
+
+    name: str = ""
+    technologies: list[str] = Field(default_factory=list)
+    bullets: list[str] = Field(default_factory=list)
+
+
+class ResumeOptimizerAIResponse(AIResponse):
+    """Internal structured content returned by the optimization model."""
+
+    personal: ResumePersonalDetails
+    professional_summary: str = Field(alias="professionalSummary", min_length=1)
+    core_skills: list[str] = Field(alias="coreSkills", default_factory=list)
+    experiences: list[ResumeExperience] = Field(default_factory=list)
+    education: list[ResumeEducation] = Field(default_factory=list)
+    projects: list[ResumeProject] = Field(default_factory=list)
+    certifications: list[str] = Field(default_factory=list)
 
 
 class CVBuilderRequest(AISchema):

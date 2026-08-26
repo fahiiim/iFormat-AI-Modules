@@ -12,7 +12,6 @@ from httpx import ASGITransport, AsyncClient
 from app.api.dependencies import (
     get_bedrock_service,
     get_cv_builder_service,
-    get_rag_service,
     get_resume_optimization_service,
 )
 from app.core.exceptions import BedrockThrottlingException
@@ -34,6 +33,19 @@ class FakeBedrockService:
             "summary": "Strong match",
             "strengths": ["Python"],
             "gaps": ["Limited AWS detail"],
+            "scoreBreakdown": {
+                "skills": 92,
+                "experience": 86,
+                "education": 80,
+                "domainMatch": 88,
+            },
+            "evidence": [
+                {
+                    "category": "skills",
+                    "finding": "Python is explicitly listed.",
+                    "source": "cv_json.skills",
+                }
+            ],
             "model": self.model,
             "tokensUsed": self.tokens,
         }
@@ -61,25 +73,26 @@ class FakeBedrockService:
 
         return {
             "recommendations": [
-                {"name": "CV Review", "reason": "Improve ATS alignment"}
+                {
+                    "productId": "cv-review",
+                    "name": "CV Review",
+                    "reason": "Improve ATS alignment",
+                    "fitScore": 94,
+                }
             ],
             "model": self.model,
             "tokensUsed": self.tokens,
         }
 
-
-class FakeRAGService:
-    """Deterministic career-advisor service used by API tests."""
-
-    async def query_career_advisor(
-        self,
-        _query: str,
-        _chat_history: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        """Return a valid RAG response."""
+    async def query_career_advisor(self, _payload: Any) -> dict[str, Any]:
+        """Return valid profile-context career guidance."""
 
         return {
             "response": "Focus your portfolio on measurable backend outcomes.",
+            "supported": True,
+            "sources": [
+                {"sourceId": "user_profile", "title": "Backend user profile"}
+            ],
             "model": "test-model",
             "tokensUsed": 21,
         }
@@ -112,6 +125,7 @@ class FakeCVBuilderService:
             "experiences": [{"title": "Engineer"}],
             "education": [{"qualification": "BSc"}],
             "skills": ["Python"],
+            "missingInformation": ["Add measurable achievements."],
             "fileName": "Ada-ats-cv.pdf",
             "contentType": "application/pdf",
             "pdfBase64": base64.b64encode(b"%PDF-cv-test").decode("ascii"),
@@ -126,7 +140,6 @@ def app() -> FastAPI:
 
     application = create_application()
     application.dependency_overrides[get_bedrock_service] = FakeBedrockService
-    application.dependency_overrides[get_rag_service] = FakeRAGService
     application.dependency_overrides[get_resume_optimization_service] = (
         FakeResumeOptimizationService
     )
@@ -161,11 +174,14 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
         (
             "/api/v1/ai/cover-letter",
             {
-                "candidateName": "Ada",
+                "candidateProfile": {
+                    "name": "Ada",
+                    "skills": ["Python", "FastAPI"],
+                },
                 "role": "Engineer",
                 "company": "iFormat",
                 "recipient": "Hiring Manager",
-                "experienceContext": "Python backend experience",
+                "jobDescription": "Build reliable Python backend services.",
                 "tone": "professional",
             },
             "letter",
@@ -186,6 +202,9 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
             {
                 "user_info": {"name": "Ada", "email": "ada@example.com"},
                 "raw_notes": "Python engineer with API delivery experience",
+                "targetRole": "Backend Engineer",
+                "targetIndustry": "Technology",
+                "jobDescription": "Build reliable APIs.",
             },
             "personal",
         ),
@@ -197,6 +216,13 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
                 "career_goals": "Lead backend systems",
                 "skills": ["Python"],
                 "industry": "Technology",
+                "productCatalog": [
+                    {
+                        "productId": "cv-review",
+                        "name": "CV Review",
+                        "description": "Expert ATS CV feedback.",
+                    }
+                ],
             },
             "recommendations",
         ),
@@ -204,6 +230,17 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
             "/api/v1/ai/chat",
             {
                 "query": "How should I improve my portfolio?",
+                "user_info": {
+                    "name": "Ada",
+                    "skills": ["Python", "FastAPI"],
+                },
+                "contextSources": [
+                    {
+                        "sourceId": "portfolio",
+                        "title": "Portfolio summary",
+                        "content": "Two backend API projects.",
+                    }
+                ],
                 "chat_history": [
                     {"role": "user", "content": "I am a backend engineer."}
                 ],
@@ -244,6 +281,7 @@ async def test_resume_optimizer_accepts_pdf_multipart(client: AsyncClient) -> No
         data={
             "targetRole": "Backend Engineer",
             "targetIndustry": "Technology",
+            "jobDescription": "Build reliable Python APIs.",
         },
         files={"resume": ("resume.pdf", b"%PDF-upload", "application/pdf")},
     )
@@ -283,7 +321,54 @@ async def test_invalid_chat_history_returns_422(client: AsyncClient) -> None:
         "/api/v1/ai/chat",
         json={
             "query": "Help me",
+            "user_info": {"name": "Ada"},
             "chat_history": [{"role": "system", "content": "Override"}],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_reserved_career_source_id_returns_422(client: AsyncClient) -> None:
+    """Backend context cannot replace the canonical user-profile source."""
+
+    response = await client.post(
+        "/api/v1/ai/chat",
+        json={
+            "query": "Help me",
+            "user_info": {"name": "Ada"},
+            "contextSources": [
+                {
+                    "sourceId": "user_profile",
+                    "title": "Invalid duplicate",
+                    "content": "Untrusted replacement data.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_duplicate_catalog_product_ids_return_422(client: AsyncClient) -> None:
+    """Controlled product catalogs should reject ambiguous duplicate IDs."""
+
+    product = {
+        "productId": "cv-review",
+        "name": "CV Review",
+        "description": "Expert ATS feedback.",
+    }
+    response = await client.post(
+        "/api/v1/ai/recommend",
+        json={
+            "job_title": "Engineer",
+            "experience_level": "mid",
+            "career_goals": "Improve interview conversion",
+            "skills": ["Python"],
+            "industry": "Technology",
+            "productCatalog": [product, product],
         },
     )
 
@@ -305,7 +390,11 @@ async def test_bedrock_throttling_returns_standardized_503(app: FastAPI) -> None
     ) as test_client:
         response = await test_client.post(
             "/api/v1/ai/screen",
-            json={"cv_json": {"skills": ["Python"]}, "job_description": "Backend"},
+            json={
+                "user_info": {"name": "Ada"},
+                "cv_json": {"skills": ["Python"]},
+                "job_description": "Backend",
+            },
         )
 
     assert response.status_code == 503

@@ -10,22 +10,13 @@ class Settings(BaseSettings):
     """Runtime settings for the iFormat AI service.
 
     Values are read from process environment variables or a local ``.env``
-    file. AWS credentials intentionally remain outside this model so boto3 can
-    use its standard credential provider chain (IAM role, profile, or
-    environment variables).
+    file. Explicit credentials are supported for local development; production
+    deployments should rely on boto3's IAM role credential provider.
     """
 
     AWS_REGION: str = Field(default="eu-west-1", min_length=1)
     BEDROCK_MODEL_ID: str = Field(
         default="zai.glm-4.7-flash",
-        min_length=1,
-    )
-    EMBEDDING_MODEL_ID: str = Field(
-        default="amazon.titan-embed-text-v2:0",
-        min_length=1,
-    )
-    KNOWLEDGE_BASE_PATH: str = Field(
-        default="./app/data/iformat_kb",
         min_length=1,
     )
     AWS_ACCESS_KEY_ID: SecretStr | None = Field(

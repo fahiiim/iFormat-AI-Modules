@@ -1,10 +1,14 @@
 """HTTP-only route handlers for the iFormat AI API."""
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, File, Form, UploadFile, status
 
-from app.api.dependencies import BedrockServiceDependency, RAGServiceDependency
+from app.api.dependencies import (
+    BedrockServiceDependency,
+    RAGServiceDependency,
+    ResumeOptimizationServiceDependency,
+)
 from app.core.exceptions import (
     AIServiceException,
     raise_http_exception_for_service_error,
@@ -20,11 +24,11 @@ from app.schemas.ai_schemas import (
     CVBuilderResponse,
     ProductRecommenderRequest,
     ProductRecommenderResponse,
-    ResumeOptimizerRequest,
     ResumeOptimizerResponse,
     ScreeningRequest,
     ScreeningResponse,
 )
+from app.services.resume_service import MAX_RESUME_PDF_BYTES
 
 router = APIRouter(prefix="/ai", tags=["AI Services"])
 
@@ -34,6 +38,16 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     },
     status.HTTP_503_SERVICE_UNAVAILABLE: {
         "description": "The AI provider or knowledge base is temporarily unavailable."
+    },
+}
+
+RESUME_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **ERROR_RESPONSES,
+    status.HTTP_413_CONTENT_TOO_LARGE: {
+        "description": "The uploaded resume PDF exceeds 10 MB."
+    },
+    status.HTTP_422_UNPROCESSABLE_CONTENT: {
+        "description": "The upload is not a readable, text-based resume PDF."
     },
 }
 
@@ -99,18 +113,37 @@ async def generate_cold_email(
     "/resume/optimize",
     response_model=ResumeOptimizerResponse,
     status_code=status.HTTP_200_OK,
-    responses=ERROR_RESPONSES,
+    responses=RESUME_ERROR_RESPONSES,
 )
 async def optimize_resume(
-    payload: ResumeOptimizerRequest,
-    service: BedrockServiceDependency,
+    resume: Annotated[
+        UploadFile,
+        File(description="Original text-based resume in PDF format."),
+    ],
+    target_role: Annotated[
+        str,
+        Form(alias="targetRole", min_length=1, max_length=300),
+    ],
+    target_industry: Annotated[
+        str,
+        Form(alias="targetIndustry", min_length=1, max_length=300),
+    ],
+    service: ResumeOptimizationServiceDependency,
 ) -> ResumeOptimizerResponse:
-    """Optimize raw resume content for a target role and industry."""
+    """Extract an uploaded PDF and return a newly optimized resume PDF."""
 
     try:
-        result = await service.optimize_resume(payload)
+        pdf_bytes = await resume.read(MAX_RESUME_PDF_BYTES + 1)
+        result = await service.optimize_resume_pdf(
+            pdf_bytes=pdf_bytes,
+            original_filename=resume.filename,
+            target_role=target_role,
+            target_industry=target_industry,
+        )
     except AIServiceException as exc:
         raise_http_exception_for_service_error(exc)
+    finally:
+        await resume.close()
     return ResumeOptimizerResponse.model_validate(result)
 
 

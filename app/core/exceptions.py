@@ -71,6 +71,29 @@ class RAGNotReadyException(RAGServiceException):
     public_message = "The career advisor knowledge base is not available."
 
 
+class InvalidResumePDFException(AIServiceException):
+    """Raised when an uploaded resume is not a readable text-based PDF."""
+
+    status_code = HTTPStatus.UNPROCESSABLE_ENTITY
+    error_code = "INVALID_RESUME_PDF"
+    public_message = "The uploaded resume must be a readable, text-based PDF."
+
+
+class ResumePDFTooLargeException(InvalidResumePDFException):
+    """Raised when an uploaded resume exceeds the configured size limit."""
+
+    status_code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+    error_code = "RESUME_PDF_TOO_LARGE"
+    public_message = "The uploaded resume PDF is too large."
+
+
+class ResumeGenerationException(AIServiceException):
+    """Raised when an optimized resume PDF cannot be generated."""
+
+    error_code = "RESUME_GENERATION_FAILED"
+    public_message = "The optimized resume PDF could not be generated."
+
+
 def _error_payload(exc: AIServiceException) -> dict[str, dict[str, str]]:
     """Build the stable JSON error envelope for a service exception."""
 

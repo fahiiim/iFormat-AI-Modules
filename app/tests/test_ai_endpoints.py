@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api.dependencies import (
     get_bedrock_service,
+    get_cv_builder_service,
     get_rag_service,
     get_resume_optimization_service,
 )
@@ -51,18 +52,6 @@ class FakeBedrockService:
 
         return {
             "email": "Subject: Python role\n\nHello, ...",
-            "model": self.model,
-            "tokensUsed": self.tokens,
-        }
-
-    async def build_cv(self, _payload: Any) -> dict[str, Any]:
-        """Return a valid CV-builder response."""
-
-        return {
-            "personal": {"name": "Ada"},
-            "experiences": [{"role": "Engineer"}],
-            "education": [{"degree": "BSc"}],
-            "skills": ["Python"],
             "model": self.model,
             "tokensUsed": self.tokens,
         }
@@ -112,6 +101,25 @@ class FakeResumeOptimizationService:
         }
 
 
+class FakeCVBuilderService:
+    """Deterministic ATS CV service used by API tests."""
+
+    async def build_cv_pdf(self, _payload: Any) -> dict[str, Any]:
+        """Return valid normalized sections and an encoded CV PDF."""
+
+        return {
+            "personal": {"name": "Ada"},
+            "experiences": [{"title": "Engineer"}],
+            "education": [{"qualification": "BSc"}],
+            "skills": ["Python"],
+            "fileName": "Ada-ats-cv.pdf",
+            "contentType": "application/pdf",
+            "pdfBase64": base64.b64encode(b"%PDF-cv-test").decode("ascii"),
+            "model": "test-model",
+            "tokensUsed": 42,
+        }
+
+
 @pytest.fixture
 def app() -> FastAPI:
     """Return an application with all external AI calls overridden."""
@@ -122,6 +130,7 @@ def app() -> FastAPI:
     application.dependency_overrides[get_resume_optimization_service] = (
         FakeResumeOptimizationService
     )
+    application.dependency_overrides[get_cv_builder_service] = FakeCVBuilderService
     return application
 
 
@@ -142,7 +151,11 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     [
         (
             "/api/v1/ai/screen",
-            {"cv_json": {"skills": ["Python"]}, "job_description": "Backend"},
+            {
+                "user_info": {"name": "Ada"},
+                "cv_json": {"skills": ["Python"]},
+                "job_description": "Backend",
+            },
             "score",
         ),
         (
@@ -170,7 +183,10 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
         ),
         (
             "/api/v1/ai/cv/build",
-            {"raw_notes": "Ada, Python engineer"},
+            {
+                "user_info": {"name": "Ada", "email": "ada@example.com"},
+                "raw_notes": "Python engineer with API delivery experience",
+            },
             "personal",
         ),
         (
@@ -212,6 +228,11 @@ async def test_ai_endpoint_contracts(
     assert body["model"] == "test-model"
     assert isinstance(body["tokensUsed"], int)
     assert "tokens_used" not in body
+
+    if path == "/api/v1/ai/cv/build":
+        assert body["fileName"] == "Ada-ats-cv.pdf"
+        assert body["contentType"] == "application/pdf"
+        assert base64.b64decode(body["pdfBase64"]).startswith(b"%PDF-")
 
 
 @pytest.mark.asyncio

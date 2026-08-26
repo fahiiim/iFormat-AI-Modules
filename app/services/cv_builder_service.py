@@ -8,9 +8,9 @@ from pydantic import ValidationError
 
 from app.core.exceptions import BedrockResponseException, ResumeGenerationException
 from app.schemas.ai_schemas import (
+    CVBuilderAIResponse,
     CVBuilderRequest,
     CVBuilderResponse,
-    ResumeOptimizerAIResponse,
 )
 from app.services.resume_service import (
     build_cv_download_filename,
@@ -53,7 +53,7 @@ class CVBuilderService:
 
         ai_result = await self._bedrock_service.build_cv(request)
         try:
-            content = ResumeOptimizerAIResponse.model_validate(ai_result)
+            content = CVBuilderAIResponse.model_validate(ai_result)
         except ValidationError as exc:
             raise BedrockResponseException() from exc
 
@@ -61,7 +61,7 @@ class CVBuilderService:
             pdf_data = await asyncio.to_thread(
                 render_ats_resume_pdf,
                 content,
-                content.personal.headline or "Professional CV",
+                request.target_role,
             )
         except ResumeGenerationException:
             raise
@@ -75,6 +75,7 @@ class CVBuilderService:
             ],
             education=[item.model_dump(by_alias=True) for item in content.education],
             skills=content.core_skills,
+            missingInformation=content.missing_information,
             fileName=build_cv_download_filename(content.personal.name),
             contentType="application/pdf",
             pdfBase64=base64.b64encode(pdf_data).decode("ascii"),

@@ -35,6 +35,7 @@ PROJECT_FILES = (
     "app/services/__init__.py",
     "app/services/bedrock_service.py",
     "app/services/rag_service.py",
+    "app/services/resume_service.py",
     "app/utils/__init__.py",
     "app/utils/prompts.py",
     "app/tests/__init__.py",

@@ -5,6 +5,17 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def _normalize_string_list(value: Any) -> Any:
+    """Normalize common model variations for fields declared as string lists."""
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    return value
+
+
 class AISchema(BaseModel):
     """Base contract with strict keys and predictable alias serialization."""
 
@@ -116,6 +127,13 @@ class ResumePersonalDetails(AISchema):
     location: str = ""
     links: list[str] = Field(default_factory=list)
 
+    @field_validator("links", mode="before")
+    @classmethod
+    def normalize_links(cls, value: Any) -> Any:
+        """Accept a single link string as a one-item list."""
+
+        return _normalize_string_list(value)
+
 
 class ResumeExperience(AISchema):
     """One normalized work-experience entry."""
@@ -127,6 +145,13 @@ class ResumeExperience(AISchema):
     end_date: str = Field(alias="endDate", default="")
     bullets: list[str] = Field(default_factory=list)
 
+    @field_validator("bullets", mode="before")
+    @classmethod
+    def normalize_bullets(cls, value: Any) -> Any:
+        """Accept a single achievement string as a one-item list."""
+
+        return _normalize_string_list(value)
+
 
 class ResumeEducation(AISchema):
     """One normalized education entry."""
@@ -137,6 +162,13 @@ class ResumeEducation(AISchema):
     completion_date: str = Field(alias="completionDate", default="")
     details: list[str] = Field(default_factory=list)
 
+    @field_validator("details", mode="before")
+    @classmethod
+    def normalize_details(cls, value: Any) -> Any:
+        """Accept a single education detail as a one-item list."""
+
+        return _normalize_string_list(value)
+
 
 class ResumeProject(AISchema):
     """One normalized project entry."""
@@ -144,6 +176,13 @@ class ResumeProject(AISchema):
     name: str = ""
     technologies: list[str] = Field(default_factory=list)
     bullets: list[str] = Field(default_factory=list)
+
+    @field_validator("technologies", "bullets", mode="before")
+    @classmethod
+    def normalize_project_lists(cls, value: Any) -> Any:
+        """Accept single project technology or bullet strings as lists."""
+
+        return _normalize_string_list(value)
 
 
 class ResumeOptimizerAIResponse(AIResponse):
@@ -156,6 +195,24 @@ class ResumeOptimizerAIResponse(AIResponse):
     education: list[ResumeEducation] = Field(default_factory=list)
     projects: list[ResumeProject] = Field(default_factory=list)
     certifications: list[str] = Field(default_factory=list)
+
+    @field_validator("core_skills", "certifications", mode="before")
+    @classmethod
+    def normalize_top_level_string_lists(cls, value: Any) -> Any:
+        """Accept single skill or certification strings as lists."""
+
+        return _normalize_string_list(value)
+
+    @field_validator("experiences", "education", "projects", mode="before")
+    @classmethod
+    def normalize_section_collections(cls, value: Any) -> Any:
+        """Accept one section object when the model omits the surrounding list."""
+
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            return [value]
+        return value
 
 
 class CVBuilderRequest(AISchema):

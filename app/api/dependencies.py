@@ -11,6 +11,7 @@ from app.services.bedrock_service import (
     BedrockService,
     create_bedrock_runtime_client,
 )
+from app.services.cv_builder_service import CVBuilderService
 from app.services.rag_service import RAGService, get_default_rag_service
 from app.services.resume_service import ResumeOptimizationService
 
@@ -80,9 +81,28 @@ def get_resume_optimization_service(
     return ResumeOptimizationService(bedrock_service=bedrock_service)
 
 
+def get_cv_builder_service(
+    bedrock_service: Annotated[BedrockService, Depends(get_bedrock_service)],
+) -> CVBuilderService:
+    """Build the ATS CV PDF orchestration service for a request.
+
+    Args:
+        bedrock_service: Injected structured Bedrock integration.
+
+    Returns:
+        CVBuilderService: CV data merge and PDF generation service.
+    """
+
+    return CVBuilderService(bedrock_service=bedrock_service)
+
+
 BedrockServiceDependency = Annotated[BedrockService, Depends(get_bedrock_service)]
 RAGServiceDependency = Annotated[RAGService, Depends(get_rag_service)]
 ResumeOptimizationServiceDependency = Annotated[
     ResumeOptimizationService,
     Depends(get_resume_optimization_service),
+]
+CVBuilderServiceDependency = Annotated[
+    CVBuilderService,
+    Depends(get_cv_builder_service),
 ]

@@ -54,6 +54,7 @@ class FakeCVContentBuilder:
             ],
             "projects": [],
             "certifications": ["AWS Certified Developer"],
+            "missingInformation": ["Add measurable impact metrics."],
             "model": "test-model",
             "tokensUsed": 77,
         }
@@ -68,6 +69,9 @@ async def test_cv_builder_merges_inputs_and_returns_valid_pdf() -> None:
     request = CVBuilderRequest(
         user_info={"name": "Ada Lovelace", "email": "ada@example.com"},
         raw_notes="Built Python APIs for career products.",
+        targetRole="Backend Engineer",
+        targetIndustry="Technology",
+        jobDescription="Build reliable Python API services.",
     )
 
     result = await service.build_cv_pdf(request)
@@ -76,6 +80,7 @@ async def test_cv_builder_merges_inputs_and_returns_valid_pdf() -> None:
     assert result["fileName"] == "Ada-Lovelace-ats-cv.pdf"
     assert result["contentType"] == "application/pdf"
     assert result["skills"] == ["Python", "FastAPI", "AWS"]
+    assert result["missingInformation"] == ["Add measurable impact metrics."]
     assert result["model"] == "test-model"
     assert result["tokensUsed"] == 77
 

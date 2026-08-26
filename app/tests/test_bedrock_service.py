@@ -72,9 +72,7 @@ async def test_structured_converse_payload_and_usage() -> None:
         "maxTokens": 4000,
         "temperature": 0.2,
     }
-    assert client.request["additionalModelRequestFields"] == {
-        "response_format": {"type": "json_object"}
-    }
+    assert client.request["additionalModelRequestFields"] == {}
     assert "invoke_model" not in client.request
 
 
@@ -92,6 +90,28 @@ async def test_invalid_bedrock_json_raises_response_error() -> None:
 
     with pytest.raises(BedrockResponseException):
         await service.invoke_claude_structured("system", "user")
+
+
+@pytest.mark.asyncio
+async def test_markdown_fenced_json_is_accepted() -> None:
+    """GLM JSON wrapped in a Markdown fence should still parse safely."""
+
+    client = FakeBedrockClient(
+        response={
+            "output": {
+                "message": {
+                    "content": [{"text": '```json\n{"summary":"Qualified"}\n```'}]
+                }
+            },
+            "usage": {"totalTokens": 7},
+        }
+    )
+    service = BedrockService(client=client, settings=make_settings())
+
+    result = await service.invoke_claude_structured("system", "user")
+
+    assert result["data"] == {"summary": "Qualified"}
+    assert result["tokensUsed"] == 7
 
 
 @pytest.mark.asyncio

@@ -138,7 +138,7 @@ class BedrockService:
         system_prompt: str,
         user_prompt: str,
     ) -> dict[str, Any]:
-        """Invoke Claude through Converse and parse its enforced JSON output.
+        """Invoke the configured chat model and parse its JSON output.
 
         boto3 is synchronous, so the network call is delegated to a worker
         thread to avoid blocking FastAPI's event loop.
@@ -171,9 +171,7 @@ class BedrockService:
                     }
                 ],
                 inferenceConfig={"maxTokens": 4000, "temperature": 0.2},
-                additionalModelRequestFields={
-                    "response_format": {"type": "json_object"}
-                },
+                additionalModelRequestFields={},
             )
         except ClientError as exc:
             error_code = str(
@@ -198,9 +196,7 @@ class BedrockService:
             ]
             if not text_blocks:
                 raise KeyError("No text block in Bedrock response")
-            parsed_json = json.loads("".join(text_blocks))
-            if not isinstance(parsed_json, dict):
-                raise TypeError("Structured Bedrock output must be a JSON object")
+            parsed_json = self._parse_json_object("".join(text_blocks))
             tokens_used = self._extract_total_tokens(response.get("usage", {}))
         except json.JSONDecodeError as exc:
             logger.exception("Bedrock returned invalid JSON")
@@ -353,6 +349,23 @@ class BedrockService:
         return max(input_count + output_count, 0)
 
     @staticmethod
+    def _parse_json_object(raw_text: str) -> dict[str, Any]:
+        """Parse a JSON object, tolerating an optional Markdown JSON fence."""
+
+        text = raw_text.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+
+        parsed_json = json.loads(text)
+        if not isinstance(parsed_json, dict):
+            raise TypeError("Structured Bedrock output must be a JSON object")
+        return parsed_json
+
+    @staticmethod
     def _json(value: Any) -> str:
         """Serialize user data consistently for inclusion in a prompt."""
 
@@ -371,7 +384,7 @@ async def invoke_claude_structured(
     system_prompt: str,
     user_prompt: str,
 ) -> dict[str, Any]:
-    """Invoke Claude using the default service and return structured output.
+    """Invoke the configured model and return structured output.
 
     Args:
         system_prompt: Instruction defining the task and JSON contract.

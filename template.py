@@ -34,12 +34,14 @@ PROJECT_FILES = (
     "app/schemas/ai_schemas.py",
     "app/services/__init__.py",
     "app/services/bedrock_service.py",
+    "app/services/cv_builder_service.py",
     "app/services/rag_service.py",
     "app/services/resume_service.py",
     "app/utils/__init__.py",
     "app/utils/prompts.py",
     "app/tests/__init__.py",
     "app/tests/test_ai_endpoints.py",
+    "app/tests/test_cv_builder_service.py",
     "app/data/iformat_kb/.gitkeep",
 )
 

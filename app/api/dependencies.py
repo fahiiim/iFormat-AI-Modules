@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends
 
 from app.core.config import Settings, get_settings
 from app.services.bedrock_service import (
@@ -12,7 +12,6 @@ from app.services.bedrock_service import (
     create_bedrock_runtime_client,
 )
 from app.services.cv_builder_service import CVBuilderService
-from app.services.rag_service import RAGService, get_default_rag_service
 from app.services.resume_service import ResumeOptimizationService
 
 
@@ -50,22 +49,6 @@ def get_bedrock_service(
     return BedrockService(client=client, settings=settings)
 
 
-def get_rag_service(request: Request) -> RAGService:
-    """Provide the RAG service initialized by the application lifespan.
-
-    Args:
-        request: Current FastAPI request, used to access lifespan state.
-
-    Returns:
-        RAGService: Process-wide career-advisor retrieval service.
-    """
-
-    service = getattr(request.app.state, "rag_service", None)
-    if isinstance(service, RAGService):
-        return service
-    return get_default_rag_service()
-
-
 def get_resume_optimization_service(
     bedrock_service: Annotated[BedrockService, Depends(get_bedrock_service)],
 ) -> ResumeOptimizationService:
@@ -97,7 +80,6 @@ def get_cv_builder_service(
 
 
 BedrockServiceDependency = Annotated[BedrockService, Depends(get_bedrock_service)]
-RAGServiceDependency = Annotated[RAGService, Depends(get_rag_service)]
 ResumeOptimizationServiceDependency = Annotated[
     ResumeOptimizationService,
     Depends(get_resume_optimization_service),

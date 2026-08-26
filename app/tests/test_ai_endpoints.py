@@ -1,5 +1,6 @@
 """HTTP contract tests for the iFormat AI endpoints."""
 
+import base64
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -8,7 +9,11 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api.dependencies import get_bedrock_service, get_rag_service
+from app.api.dependencies import (
+    get_bedrock_service,
+    get_rag_service,
+    get_resume_optimization_service,
+)
 from app.core.exceptions import BedrockThrottlingException
 from app.main import create_application
 
@@ -46,15 +51,6 @@ class FakeBedrockService:
 
         return {
             "email": "Subject: Python role\n\nHello, ...",
-            "model": self.model,
-            "tokensUsed": self.tokens,
-        }
-
-    async def optimize_resume(self, _payload: Any) -> dict[str, Any]:
-        """Return a valid resume-optimizer response."""
-
-        return {
-            "summary": "Built resilient Python APIs.",
             "model": self.model,
             "tokensUsed": self.tokens,
         }
@@ -100,6 +96,22 @@ class FakeRAGService:
         }
 
 
+class FakeResumeOptimizationService:
+    """Deterministic resume PDF service used by API tests."""
+
+    async def optimize_resume_pdf(self, **_kwargs: Any) -> dict[str, Any]:
+        """Return a valid encoded optimized-resume response."""
+
+        return {
+            "summary": "Backend engineer focused on resilient Python APIs.",
+            "fileName": "resume-optimized.pdf",
+            "contentType": "application/pdf",
+            "pdfBase64": base64.b64encode(b"%PDF-test").decode("ascii"),
+            "model": "test-model",
+            "tokensUsed": 42,
+        }
+
+
 @pytest.fixture
 def app() -> FastAPI:
     """Return an application with all external AI calls overridden."""
@@ -107,6 +119,9 @@ def app() -> FastAPI:
     application = create_application()
     application.dependency_overrides[get_bedrock_service] = FakeBedrockService
     application.dependency_overrides[get_rag_service] = FakeRAGService
+    application.dependency_overrides[get_resume_optimization_service] = (
+        FakeResumeOptimizationService
+    )
     return application
 
 
@@ -154,15 +169,6 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
             "email",
         ),
         (
-            "/api/v1/ai/resume/optimize",
-            {
-                "rawText": "Built APIs",
-                "targetRole": "Backend Engineer",
-                "targetIndustry": "Technology",
-            },
-            "summary",
-        ),
-        (
             "/api/v1/ai/cv/build",
             {"raw_notes": "Ada, Python engineer"},
             "personal",
@@ -206,6 +212,46 @@ async def test_ai_endpoint_contracts(
     assert body["model"] == "test-model"
     assert isinstance(body["tokensUsed"], int)
     assert "tokens_used" not in body
+
+
+@pytest.mark.asyncio
+async def test_resume_optimizer_accepts_pdf_multipart(client: AsyncClient) -> None:
+    """Resume optimization should accept a PDF and return encoded PDF data."""
+
+    response = await client.post(
+        "/api/v1/ai/resume/optimize",
+        data={
+            "targetRole": "Backend Engineer",
+            "targetIndustry": "Technology",
+        },
+        files={"resume": ("resume.pdf", b"%PDF-upload", "application/pdf")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fileName"] == "resume-optimized.pdf"
+    assert body["contentType"] == "application/pdf"
+    assert base64.b64decode(body["pdfBase64"]).startswith(b"%PDF-")
+    assert body["model"] == "test-model"
+    assert body["tokensUsed"] == 42
+
+
+@pytest.mark.asyncio
+async def test_resume_optimizer_rejects_old_json_contract(
+    client: AsyncClient,
+) -> None:
+    """The superseded rawText JSON request should fail validation."""
+
+    response = await client.post(
+        "/api/v1/ai/resume/optimize",
+        json={
+            "rawText": "Built APIs",
+            "targetRole": "Backend Engineer",
+            "targetIndustry": "Technology",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

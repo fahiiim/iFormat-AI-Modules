@@ -56,21 +56,6 @@ class BedrockResponseException(AIServiceException):
     public_message = "Amazon Bedrock returned an invalid response."
 
 
-class RAGServiceException(AIServiceException):
-    """Raised when the career-advisor retrieval pipeline fails."""
-
-    error_code = "RAG_SERVICE_ERROR"
-    public_message = "The career advisor could not complete the request."
-
-
-class RAGNotReadyException(RAGServiceException):
-    """Raised when the career-advisor knowledge base is unavailable."""
-
-    status_code = HTTPStatus.SERVICE_UNAVAILABLE
-    error_code = "RAG_NOT_READY"
-    public_message = "The career advisor knowledge base is not available."
-
-
 class InvalidResumePDFException(AIServiceException):
     """Raised when an uploaded resume is not a readable text-based PDF."""
 

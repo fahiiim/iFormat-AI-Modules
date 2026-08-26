@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, UploadFile, status
 
 from app.api.dependencies import (
     BedrockServiceDependency,
+    CVBuilderServiceDependency,
     RAGServiceDependency,
     ResumeOptimizationServiceDependency,
 )
@@ -155,12 +156,12 @@ async def optimize_resume(
 )
 async def build_cv(
     payload: CVBuilderRequest,
-    service: BedrockServiceDependency,
+    service: CVBuilderServiceDependency,
 ) -> CVBuilderResponse:
-    """Build normalized CV sections from unstructured career notes."""
+    """Merge backend data and notes into an encoded ATS-friendly CV PDF."""
 
     try:
-        result = await service.build_cv(payload)
+        result = await service.build_cv_pdf(payload)
     except AIServiceException as exc:
         raise_http_exception_for_service_error(exc)
     return CVBuilderResponse.model_validate(result)

@@ -1,5 +1,6 @@
 """Unit tests for Bedrock request and response normalization."""
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -11,8 +12,14 @@ from app.core.exceptions import (
     BedrockResponseException,
     BedrockThrottlingException,
 )
+from app.schemas.ai_schemas import (
+    CVBuilderRequest,
+    CareerChatRequest,
+    CoverLetterRequest,
+    ProductRecommenderRequest,
+    ScreeningRequest,
+)
 from app.services.bedrock_service import BedrockService
-from app.schemas.ai_schemas import CVBuilderRequest, ScreeningRequest
 
 
 class FakeBedrockClient:
@@ -44,8 +51,6 @@ def make_settings() -> Settings:
     return Settings(
         AWS_REGION="eu-west-1",
         BEDROCK_MODEL_ID="test-profile",
-        EMBEDDING_MODEL_ID="test-embedding",
-        KNOWLEDGE_BASE_PATH="./missing-test-kb",
     )
 
 
@@ -143,7 +148,17 @@ async def test_screening_prompt_includes_backend_profile_and_cv() -> None:
                             "text": (
                                 '{"score":90,"recommendation":"Interview",'
                                 '"summary":"Strong fit","strengths":["Python"],'
-                                '"gaps":[]}'
+                                '"gaps":[],"scoreBreakdown":{"skills":95,'
+                                '"experience":85,"education":80,'
+                                '"domainMatch":90},"evidence":[{"category":'
+                                '"skills","finding":"Python listed",'
+                                '"source":"cv_json.skills"},{"category":'
+                                '"experience","finding":"API work listed",'
+                                '"source":"cv_json.experiences"},{"category":'
+                                '"education","finding":"Degree listed",'
+                                '"source":"cv_json.education"},{"category":'
+                                '"domain_match","finding":"Backend match",'
+                                '"source":"user_info.target_role"}]}'
                             )
                         }
                     ]
@@ -154,7 +169,7 @@ async def test_screening_prompt_includes_backend_profile_and_cv() -> None:
     )
     service = BedrockService(client=client, settings=make_settings())
 
-    await service.screen_candidate(
+    result = await service.screen_candidate(
         ScreeningRequest(
             user_info={"name": "Ada"},
             cv_json={"skills": ["Python"]},
@@ -166,6 +181,15 @@ async def test_screening_prompt_includes_backend_profile_and_cv() -> None:
     assert '"name":"Ada"' in prompt
     assert '"skills":["Python"]' in prompt
     assert "Python Engineer" in prompt
+    assert result["score"] == 90
+    output_schema = json.loads(
+        client.request["outputConfig"]["textFormat"]["structure"]["jsonSchema"][
+            "schema"
+        ]
+    )
+    assert "scoreBreakdown" in output_schema["properties"]
+    assert "model" not in output_schema["properties"]
+    assert "tokensUsed" not in output_schema["properties"]
 
 
 @pytest.mark.asyncio
@@ -183,7 +207,8 @@ async def test_cv_builder_prompt_merges_backend_info_and_notes() -> None:
                                 '"professionalSummary":"Python engineer",'
                                 '"coreSkills":["Python"],"experiences":[],'
                                 '"education":[],"projects":[],'
-                                '"certifications":[]}'
+                                '"certifications":[],"missingInformation":'
+                                '["Add employment dates"]}'
                             )
                         }
                     ]
@@ -198,9 +223,206 @@ async def test_cv_builder_prompt_merges_backend_info_and_notes() -> None:
         CVBuilderRequest(
             user_info={"name": "Ada", "email": "ada@example.com"},
             raw_notes="Built FastAPI services.",
+            targetRole="Backend Engineer",
+            targetIndustry="Technology",
+            jobDescription="Build reliable API services.",
         )
     )
 
     prompt = client.request["messages"][0]["content"][0]["text"]
     assert '"email":"ada@example.com"' in prompt
     assert "Built FastAPI services." in prompt
+    assert "Backend Engineer" in prompt
+    assert "Build reliable API services." in prompt
+
+
+@pytest.mark.asyncio
+async def test_cover_letter_prompt_uses_full_profile_and_job_description() -> None:
+    """Cover-letter generation should receive complete backend context."""
+
+    client = FakeBedrockClient(
+        response={
+            "output": {
+                "message": {
+                    "content": [{"text": '{"letter":"Dear Hiring Manager"}'}]
+                }
+            },
+            "usage": {"totalTokens": 6},
+        }
+    )
+    service = BedrockService(client=client, settings=make_settings())
+    await service.generate_cover_letter(
+        CoverLetterRequest(
+            candidateProfile={
+                "name": "Ada",
+                "skills": ["Python", "FastAPI"],
+            },
+            role="Backend Engineer",
+            company="iFormat",
+            recipient="Hiring Manager",
+            jobDescription="Build reliable Python APIs.",
+            tone="professional",
+        )
+    )
+
+    prompt = client.request["messages"][0]["content"][0]["text"]
+    assert '"skills":["Python","FastAPI"]' in prompt
+    assert "Build reliable Python APIs." in prompt
+
+
+@pytest.mark.asyncio
+async def test_resume_prompt_includes_target_job_description() -> None:
+    """Resume optimization should target the supplied vacancy requirements."""
+
+    client = FakeBedrockClient(
+        response={
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": (
+                                '{"personal":{"name":"Ada"},'
+                                '"professionalSummary":"Backend engineer",'
+                                '"coreSkills":["Python"],"experiences":[],'
+                                '"education":[],"projects":[],'
+                                '"certifications":[]}'
+                            )
+                        }
+                    ]
+                }
+            },
+            "usage": {"totalTokens": 8},
+        }
+    )
+    service = BedrockService(client=client, settings=make_settings())
+    await service.optimize_resume(
+        raw_text="Ada - Python engineer",
+        target_role="Backend Engineer",
+        target_industry="Technology",
+        job_description="Build resilient FastAPI services on AWS.",
+    )
+
+    prompt = client.request["messages"][0]["content"][0]["text"]
+    assert "Build resilient FastAPI services on AWS." in prompt
+
+
+@pytest.mark.asyncio
+async def test_product_recommendations_are_limited_to_catalog_ids() -> None:
+    """Product output should use backend catalog IDs and canonical names."""
+
+    client = FakeBedrockClient(
+        response={
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": (
+                                '{"recommendations":[{"productId":"cv-review",'
+                                '"name":"Incorrect model name","reason":'
+                                '"Improves ATS alignment","fitScore":95}]}'
+                            )
+                        }
+                    ]
+                }
+            },
+            "usage": {"totalTokens": 9},
+        }
+    )
+    service = BedrockService(client=client, settings=make_settings())
+    result = await service.recommend_products(
+        ProductRecommenderRequest(
+            job_title="Backend Engineer",
+            experience_level="mid",
+            career_goals="Improve interview conversion",
+            skills=["Python"],
+            industry="Technology",
+            productCatalog=[
+                {
+                    "productId": "cv-review",
+                    "name": "iFormat CV Review",
+                    "description": "Expert ATS CV feedback.",
+                }
+            ],
+        )
+    )
+
+    assert result["recommendations"][0]["productId"] == "cv-review"
+    assert result["recommendations"][0]["name"] == "iFormat CV Review"
+    prompt = client.request["messages"][0]["content"][0]["text"]
+    assert '"productId":"cv-review"' in prompt
+
+
+@pytest.mark.asyncio
+async def test_career_guide_resolves_backend_source_references() -> None:
+    """Career guidance should cite only canonical backend context sources."""
+
+    client = FakeBedrockClient(
+        response={
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": (
+                                '{"response":"Add measurable API outcomes.",'
+                                '"supported":true,"sourceIds":'
+                                '["user_profile","portfolio"]}'
+                            )
+                        }
+                    ]
+                }
+            },
+            "usage": {"totalTokens": 12},
+        }
+    )
+    service = BedrockService(client=client, settings=make_settings())
+    result = await service.query_career_advisor(
+        CareerChatRequest(
+            query="How can I improve my profile?",
+            user_info={"skills": ["Python"]},
+            contextSources=[
+                {
+                    "sourceId": "portfolio",
+                    "title": "Portfolio summary",
+                    "content": "Two API projects without outcome metrics.",
+                }
+            ],
+        )
+    )
+
+    assert result["supported"] is True
+    assert result["sources"] == [
+        {"sourceId": "user_profile", "title": "Backend user profile"},
+        {"sourceId": "portfolio", "title": "Portfolio summary"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_career_guide_rejects_unknown_model_source() -> None:
+    """A hallucinated source ID should fail the service contract."""
+
+    client = FakeBedrockClient(
+        response={
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": (
+                                '{"response":"Unsupported claim",'
+                                '"supported":true,"sourceIds":["invented"]}'
+                            )
+                        }
+                    ]
+                }
+            },
+            "usage": {"totalTokens": 5},
+        }
+    )
+    service = BedrockService(client=client, settings=make_settings())
+
+    with pytest.raises(BedrockResponseException):
+        await service.query_career_advisor(
+            CareerChatRequest(
+                query="What should I do?",
+                user_info={"skills": ["Python"]},
+            )
+        )

@@ -16,17 +16,20 @@ class FakeResumeContentOptimizer:
     """Return deterministic normalized resume content without calling AWS."""
 
     extracted_text = ""
+    job_description = ""
 
     async def optimize_resume(
         self,
         raw_text: str,
         target_role: str,
         target_industry: str,
+        job_description: str,
     ) -> dict[str, Any]:
         """Capture extracted text and return a complete model response."""
 
         del target_role, target_industry
         self.extracted_text = raw_text
+        self.job_description = job_description
         return {
             "personal": {
                 "name": "Ada Lovelace",
@@ -95,9 +98,11 @@ async def test_resume_service_extracts_and_generates_valid_pdf() -> None:
         original_filename="Ada Resume.pdf",
         target_role="Backend Engineer",
         target_industry="Technology",
+        job_description="Build reliable Python backend services.",
     )
 
     assert "FastAPI services" in optimizer.extracted_text
+    assert "reliable Python" in optimizer.job_description
     assert result["fileName"] == "Ada-Resume-optimized.pdf"
     assert result["model"] == "test-model"
     assert result["tokensUsed"] == 123
@@ -122,4 +127,5 @@ async def test_resume_service_rejects_non_pdf_bytes() -> None:
             original_filename="resume.pdf",
             target_role="Backend Engineer",
             target_industry="Technology",
+            job_description="Build reliable Python backend services.",
         )

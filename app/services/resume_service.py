@@ -45,6 +45,7 @@ class ResumeContentOptimizer(Protocol):
         raw_text: str,
         target_role: str,
         target_industry: str,
+        job_description: str,
     ) -> dict[str, Any]:
         """Return normalized optimized resume content."""
 
@@ -67,6 +68,7 @@ class ResumeOptimizationService:
         original_filename: str | None,
         target_role: str,
         target_industry: str,
+        job_description: str,
     ) -> dict[str, Any]:
         """Extract, optimize, render, and encode a resume PDF.
 
@@ -76,6 +78,7 @@ class ResumeOptimizationService:
                 safe download filename.
             target_role: Role for which the document should be tailored.
             target_industry: Target industry terminology and context.
+            job_description: Target vacancy requirements used for tailoring.
 
         Returns:
             dict[str, Any]: Base64 PDF data, filename, summary, model, and token
@@ -93,6 +96,7 @@ class ResumeOptimizationService:
             raw_text=raw_text,
             target_role=target_role,
             target_industry=target_industry,
+            job_description=job_description,
         )
         optimized_content = ResumeOptimizerAIResponse.model_validate(ai_result)
 

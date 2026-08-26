@@ -88,15 +88,30 @@ def create_bedrock_runtime_client(
     """
 
     resolved_settings = settings or get_settings()
-    client = boto3.client(
-        "bedrock-runtime",
-        region_name=resolved_settings.AWS_REGION,
-        config=Config(
+    client_options: dict[str, Any] = {
+        "region_name": resolved_settings.AWS_REGION,
+        "config": Config(
             connect_timeout=10,
             read_timeout=120,
             retries={"max_attempts": 3, "mode": "adaptive"},
         ),
-    )
+    }
+    if (
+        resolved_settings.AWS_ACCESS_KEY_ID is not None
+        and resolved_settings.AWS_SECRET_ACCESS_KEY is not None
+    ):
+        client_options["aws_access_key_id"] = (
+            resolved_settings.AWS_ACCESS_KEY_ID.get_secret_value()
+        )
+        client_options["aws_secret_access_key"] = (
+            resolved_settings.AWS_SECRET_ACCESS_KEY.get_secret_value()
+        )
+        if resolved_settings.AWS_SESSION_TOKEN is not None:
+            client_options["aws_session_token"] = (
+                resolved_settings.AWS_SESSION_TOKEN.get_secret_value()
+            )
+
+    client = boto3.client("bedrock-runtime", **client_options)
     return cast(BedrockRuntimeClient, client)
 
 

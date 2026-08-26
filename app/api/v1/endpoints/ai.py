@@ -7,7 +7,6 @@ from fastapi import APIRouter, File, Form, UploadFile, status
 from app.api.dependencies import (
     BedrockServiceDependency,
     CVBuilderServiceDependency,
-    RAGServiceDependency,
     ResumeOptimizationServiceDependency,
 )
 from app.core.exceptions import (
@@ -38,7 +37,7 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         "description": "The AI provider returned an invalid response or failed."
     },
     status.HTTP_503_SERVICE_UNAVAILABLE: {
-        "description": "The AI provider or knowledge base is temporarily unavailable."
+        "description": "The AI provider is temporarily unavailable."
     },
 }
 
@@ -129,6 +128,10 @@ async def optimize_resume(
         str,
         Form(alias="targetIndustry", min_length=1, max_length=300),
     ],
+    job_description: Annotated[
+        str,
+        Form(alias="jobDescription", min_length=1, max_length=50_000),
+    ],
     service: ResumeOptimizationServiceDependency,
 ) -> ResumeOptimizerResponse:
     """Extract an uploaded PDF and return a newly optimized resume PDF."""
@@ -140,6 +143,7 @@ async def optimize_resume(
             original_filename=resume.filename,
             target_role=target_role,
             target_industry=target_industry,
+            job_description=job_description,
         )
     except AIServiceException as exc:
         raise_http_exception_for_service_error(exc)
@@ -194,15 +198,12 @@ async def recommend_products(
 )
 async def query_career_advisor(
     payload: CareerChatRequest,
-    service: RAGServiceDependency,
+    service: BedrockServiceDependency,
 ) -> CareerChatResponse:
-    """Answer a career question using the iFormat RAG knowledge base."""
+    """Guide a user using authoritative context supplied by the backend."""
 
     try:
-        result = await service.query_career_advisor(
-            payload.query,
-            payload.chat_history,
-        )
+        result = await service.query_career_advisor(payload)
     except AIServiceException as exc:
         raise_http_exception_for_service_error(exc)
     return CareerChatResponse.model_validate(result)

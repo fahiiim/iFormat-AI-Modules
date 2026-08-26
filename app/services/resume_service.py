@@ -98,7 +98,7 @@ class ResumeOptimizationService:
 
         try:
             optimized_pdf = await asyncio.to_thread(
-                self._render_resume_pdf,
+                render_ats_resume_pdf,
                 optimized_content,
                 target_role,
             )
@@ -461,7 +461,7 @@ class ResumeOptimizationService:
         canvas.saveState()
         canvas.setFont("Helvetica", 7.5)
         canvas.setFillColor(HexColor("#718096"))
-        canvas.drawString(17 * mm, 8 * mm, "iFormat Optimized Resume")
+        canvas.drawString(17 * mm, 8 * mm, "iFormat ATS Resume")
         canvas.drawRightString(
             A4[0] - 17 * mm,
             8 * mm,
@@ -490,3 +490,34 @@ class ResumeOptimizationService:
         source_stem = Path(original_filename or "resume").stem
         safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "-", source_stem).strip("-_")
         return f"{safe_stem or 'resume'}-optimized.pdf"
+
+
+def render_ats_resume_pdf(
+    content: ResumeOptimizerAIResponse,
+    fallback_headline: str,
+) -> bytes:
+    """Render validated resume content as an extractable ATS-friendly PDF.
+
+    Args:
+        content: Validated structured resume sections and AI usage metadata.
+        fallback_headline: Heading used when no professional headline exists.
+
+    Returns:
+        bytes: Complete PDF document bytes.
+    """
+
+    return ResumeOptimizationService._render_resume_pdf(content, fallback_headline)
+
+
+def build_cv_download_filename(candidate_name: str) -> str:
+    """Build a safe filename for a newly generated CV.
+
+    Args:
+        candidate_name: Candidate name returned in the normalized CV.
+
+    Returns:
+        str: Stable filename ending in ``-ats-cv.pdf``.
+    """
+
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "-", candidate_name).strip("-_")
+    return f"{safe_name or 'iformat'}-ats-cv.pdf"

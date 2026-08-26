@@ -29,8 +29,7 @@ from app.schemas.ai_schemas import (
     CVBuilderResponse,
     ProductRecommenderRequest,
     ProductRecommenderResponse,
-    ResumeOptimizerRequest,
-    ResumeOptimizerResponse,
+    ResumeOptimizerAIResponse,
     ScreeningRequest,
     ScreeningResponse,
 )
@@ -265,17 +264,28 @@ class BedrockService:
 
     async def optimize_resume(
         self,
-        request: ResumeOptimizerRequest,
+        raw_text: str,
+        target_role: str,
+        target_industry: str,
     ) -> dict[str, Any]:
-        """Rewrite resume content for ATS relevance and impact."""
+        """Rebuild extracted resume content into normalized ATS sections.
+
+        Args:
+            raw_text: Text extracted from the uploaded resume PDF.
+            target_role: Role for which the resume should be tailored.
+            target_industry: Industry whose terminology should be considered.
+
+        Returns:
+            dict[str, Any]: Structured resume content with usage metadata.
+        """
 
         user_prompt = RESUME_OPTIMIZE_USER_PROMPT.format(
-            raw_text=request.raw_text,
-            target_role=request.target_role,
-            target_industry=request.target_industry,
+            raw_text=raw_text,
+            target_role=target_role,
+            target_industry=target_industry,
         )
         return await self._invoke_for_contract(
-            ResumeOptimizerResponse,
+            ResumeOptimizerAIResponse,
             RESUME_OPTIMIZE_PROMPT,
             user_prompt,
         )

@@ -15,7 +15,6 @@ PACKAGE_DIRECTORIES = (
     "app/services",
     "app/utils",
     "app/tests",
-    "app/data/iformat_kb",
 )
 
 PROJECT_FILES = (
@@ -35,14 +34,14 @@ PROJECT_FILES = (
     "app/services/__init__.py",
     "app/services/bedrock_service.py",
     "app/services/cv_builder_service.py",
-    "app/services/rag_service.py",
     "app/services/resume_service.py",
     "app/utils/__init__.py",
     "app/utils/prompts.py",
     "app/tests/__init__.py",
     "app/tests/test_ai_endpoints.py",
+    "app/tests/test_bedrock_service.py",
     "app/tests/test_cv_builder_service.py",
-    "app/data/iformat_kb/.gitkeep",
+    "app/tests/test_resume_service.py",
 )
 
 

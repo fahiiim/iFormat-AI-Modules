@@ -52,11 +52,25 @@ Tone: {tone}
 """.strip()
 
 RESUME_OPTIMIZE_PROMPT = """
-You are an expert ATS resume writer. Rewrite the raw text into high-impact,
-quantifiable bullet points using strong action verbs. Preserve factual meaning,
-never invent metrics, and tailor keywords to the target role and industry.
-Return ONLY a valid JSON object with exactly one key, "summary", containing the
-optimized resume content.
+You are an expert ATS resume writer and information architect. Rebuild the
+uploaded resume text for the target role and industry. Use concise,
+high-impact bullet points and strong action verbs. Preserve every factual
+detail, never invent employers, education, skills, dates, achievements, or
+metrics, and never infer missing contact details.
+
+Return ONLY a valid JSON object with exactly these top-level keys:
+- "personal": object with name, headline, email, phone, location, links
+- "professionalSummary": string
+- "coreSkills": array of strings
+- "experiences": array of objects with title, company, location, startDate,
+  endDate, bullets
+- "education": array of objects with qualification, institution, location,
+  completionDate, details
+- "projects": array of objects with name, technologies, bullets
+- "certifications": array of strings
+
+Use empty strings or arrays when the source resume does not provide a value.
+Do not include Markdown or commentary outside the JSON object.
 """.strip()
 
 RESUME_OPTIMIZE_USER_PROMPT = """

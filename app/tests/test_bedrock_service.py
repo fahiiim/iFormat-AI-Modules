@@ -12,6 +12,7 @@ from app.core.exceptions import (
     BedrockThrottlingException,
 )
 from app.services.bedrock_service import BedrockService
+from app.schemas.ai_schemas import CVBuilderRequest, ScreeningRequest
 
 
 class FakeBedrockClient:
@@ -127,3 +128,79 @@ async def test_throttling_client_error_is_retryable() -> None:
 
     with pytest.raises(BedrockThrottlingException):
         await service.invoke_claude_structured("system", "user")
+
+
+@pytest.mark.asyncio
+async def test_screening_prompt_includes_backend_profile_and_cv() -> None:
+    """Screening should compare both backend data and CV evidence."""
+
+    client = FakeBedrockClient(
+        response={
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": (
+                                '{"score":90,"recommendation":"Interview",'
+                                '"summary":"Strong fit","strengths":["Python"],'
+                                '"gaps":[]}'
+                            )
+                        }
+                    ]
+                }
+            },
+            "usage": {"totalTokens": 11},
+        }
+    )
+    service = BedrockService(client=client, settings=make_settings())
+
+    await service.screen_candidate(
+        ScreeningRequest(
+            user_info={"name": "Ada"},
+            cv_json={"skills": ["Python"]},
+            job_description="Python Engineer",
+        )
+    )
+
+    prompt = client.request["messages"][0]["content"][0]["text"]
+    assert '"name":"Ada"' in prompt
+    assert '"skills":["Python"]' in prompt
+    assert "Python Engineer" in prompt
+
+
+@pytest.mark.asyncio
+async def test_cv_builder_prompt_merges_backend_info_and_notes() -> None:
+    """CV building should supply both input sources to the model."""
+
+    client = FakeBedrockClient(
+        response={
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": (
+                                '{"personal":{"name":"Ada"},'
+                                '"professionalSummary":"Python engineer",'
+                                '"coreSkills":["Python"],"experiences":[],'
+                                '"education":[],"projects":[],'
+                                '"certifications":[]}'
+                            )
+                        }
+                    ]
+                }
+            },
+            "usage": {"totalTokens": 15},
+        }
+    )
+    service = BedrockService(client=client, settings=make_settings())
+
+    await service.build_cv(
+        CVBuilderRequest(
+            user_info={"name": "Ada", "email": "ada@example.com"},
+            raw_notes="Built FastAPI services.",
+        )
+    )
+
+    prompt = client.request["messages"][0]["content"][0]["text"]
+    assert '"email":"ada@example.com"' in prompt
+    assert "Built FastAPI services." in prompt

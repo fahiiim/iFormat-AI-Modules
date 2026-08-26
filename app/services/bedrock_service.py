@@ -21,10 +21,15 @@ from app.core.exceptions import (
 )
 from app.schemas.ai_schemas import (
     AIResponse,
+    CareerChatAIResponse,
+    CareerChatRequest,
+    CareerChatResponse,
+    CareerChatSourceReference,
     ColdEmailRequest,
     ColdEmailResponse,
     CoverLetterRequest,
     CoverLetterResponse,
+    CVBuilderAIResponse,
     CVBuilderRequest,
     ProductRecommenderRequest,
     ProductRecommenderResponse,
@@ -33,6 +38,8 @@ from app.schemas.ai_schemas import (
     ScreeningResponse,
 )
 from app.utils.prompts import (
+    CAREER_GUIDE_SYSTEM_PROMPT,
+    CAREER_GUIDE_USER_PROMPT,
     COLD_EMAIL_SYSTEM_PROMPT,
     COLD_EMAIL_USER_PROMPT,
     COVER_LETTER_SYSTEM_PROMPT,
@@ -135,6 +142,7 @@ class BedrockService:
         self,
         system_prompt: str,
         user_prompt: str,
+        response_model: type[AIResponse] | None = None,
     ) -> dict[str, Any]:
         """Invoke the configured chat model and parse its JSON output.
 
@@ -144,6 +152,8 @@ class BedrockService:
         Args:
             system_prompt: Instruction defining Claude's role and JSON schema.
             user_prompt: User-specific content for the request.
+            response_model: Optional contract used to enforce Bedrock JSON
+                Schema structured output.
 
         Returns:
             dict[str, Any]: An envelope containing ``data``, ``tokensUsed``,
@@ -157,19 +167,27 @@ class BedrockService:
                 not contain a valid JSON object.
         """
 
+        converse_request: dict[str, Any] = {
+            "modelId": self._settings.BEDROCK_MODEL_ID,
+            "system": [{"text": system_prompt}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": user_prompt}],
+                }
+            ],
+            "inferenceConfig": {"maxTokens": 4000, "temperature": 0.2},
+            "additionalModelRequestFields": {},
+        }
+        if response_model is not None:
+            converse_request["outputConfig"] = self._build_output_config(
+                response_model
+            )
+
         try:
             response = await asyncio.to_thread(
                 self._client.converse,
-                modelId=self._settings.BEDROCK_MODEL_ID,
-                system=[{"text": system_prompt}],
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [{"text": user_prompt}],
-                    }
-                ],
-                inferenceConfig={"maxTokens": 4000, "temperature": 0.2},
-                additionalModelRequestFields={},
+                **converse_request,
             )
         except ClientError as exc:
             error_code = str(
@@ -217,11 +235,34 @@ class BedrockService:
             cv_json=self._json(request.cv_json),
             job_description=request.job_description,
         )
-        return await self._invoke_for_contract(
+        result = await self._invoke_for_contract(
             ScreeningResponse,
             SCREENING_SYSTEM_PROMPT,
             user_prompt,
         )
+        breakdown = result["scoreBreakdown"]
+        result["score"] = round(
+            (breakdown["skills"] * 0.40)
+            + (breakdown["experience"] * 0.30)
+            + (breakdown["education"] * 0.10)
+            + (breakdown["domainMatch"] * 0.20)
+        )
+        required_categories = {
+            "skills",
+            "experience",
+            "education",
+            "domain_match",
+        }
+        evidence_categories = {
+            item["category"] for item in result["evidence"]
+        }
+        valid_sources = all(
+            item["source"].startswith(("cv_json", "user_info"))
+            for item in result["evidence"]
+        )
+        if evidence_categories != required_categories or not valid_sources:
+            raise BedrockResponseException()
+        return ScreeningResponse.model_validate(result).model_dump(by_alias=True)
 
     async def generate_cover_letter(
         self,
@@ -230,11 +271,11 @@ class BedrockService:
         """Generate a tailored cover letter."""
 
         user_prompt = COVER_LETTER_USER_PROMPT.format(
-            candidate_name=request.candidate_name,
+            candidate_profile=self._json(request.candidate_profile),
             role=request.role,
             company=request.company,
             recipient=request.recipient,
-            experience_context=request.experience_context,
+            job_description=request.job_description,
             tone=request.tone,
         )
         return await self._invoke_for_contract(
@@ -267,6 +308,7 @@ class BedrockService:
         raw_text: str,
         target_role: str,
         target_industry: str,
+        job_description: str,
     ) -> dict[str, Any]:
         """Rebuild extracted resume content into normalized ATS sections.
 
@@ -274,6 +316,7 @@ class BedrockService:
             raw_text: Text extracted from the uploaded resume PDF.
             target_role: Role for which the resume should be tailored.
             target_industry: Industry whose terminology should be considered.
+            job_description: Target vacancy requirements and responsibilities.
 
         Returns:
             dict[str, Any]: Structured resume content with usage metadata.
@@ -283,6 +326,7 @@ class BedrockService:
             raw_text=raw_text,
             target_role=target_role,
             target_industry=target_industry,
+            job_description=job_description,
         )
         return await self._invoke_for_contract(
             ResumeOptimizerAIResponse,
@@ -296,9 +340,12 @@ class BedrockService:
         user_prompt = CV_BUILDER_USER_PROMPT.format(
             user_info=self._json(request.user_info),
             raw_notes=request.raw_notes,
+            target_role=request.target_role,
+            target_industry=request.target_industry,
+            job_description=request.job_description or "Not provided",
         )
         return await self._invoke_for_contract(
-            ResumeOptimizerAIResponse,
+            CVBuilderAIResponse,
             CV_BUILDER_SYSTEM_PROMPT,
             user_prompt,
         )
@@ -315,12 +362,94 @@ class BedrockService:
             career_goals=request.career_goals,
             skills=self._json(request.skills),
             industry=request.industry,
+            product_catalog=self._json(
+                [item.model_dump(by_alias=True) for item in request.product_catalog]
+            ),
         )
-        return await self._invoke_for_contract(
+        result = await self._invoke_for_contract(
             ProductRecommenderResponse,
             PRODUCT_RECOMMENDER_SYSTEM_PROMPT,
             user_prompt,
         )
+        catalog_names = {
+            item.product_id: item.name for item in request.product_catalog
+        }
+        seen_ids: set[str] = set()
+        for recommendation in result["recommendations"]:
+            product_id = recommendation["productId"]
+            if product_id not in catalog_names or product_id in seen_ids:
+                raise BedrockResponseException()
+            recommendation["name"] = catalog_names[product_id]
+            seen_ids.add(product_id)
+        return ProductRecommenderResponse.model_validate(result).model_dump(
+            by_alias=True
+        )
+
+    async def query_career_advisor(
+        self,
+        request: CareerChatRequest,
+    ) -> dict[str, Any]:
+        """Guide a user using only backend-supplied profile context.
+
+        Args:
+            request: User profile, backend context sources, chat history, and
+                current career question.
+
+        Returns:
+            dict[str, Any]: Grounded guidance, canonical sources, and usage.
+
+        Raises:
+            BedrockResponseException: If the model cites an unknown source or
+                claims support without citing backend context.
+        """
+
+        source_titles = {"user_profile": "Backend user profile"}
+        source_titles.update(
+            {source.source_id: source.title for source in request.context_sources}
+        )
+        user_prompt = CAREER_GUIDE_USER_PROMPT.format(
+            user_info=self._json(request.user_info),
+            context_sources=self._json(
+                [
+                    source.model_dump(by_alias=True)
+                    for source in request.context_sources
+                ]
+            ),
+            allowed_source_ids=self._json(list(source_titles)),
+            chat_history=self._json(
+                [
+                    message.model_dump(by_alias=True)
+                    for message in (request.chat_history or [])
+                ]
+            ),
+            query=request.query,
+        )
+        result = await self._invoke_for_contract(
+            CareerChatAIResponse,
+            CAREER_GUIDE_SYSTEM_PROMPT,
+            user_prompt,
+        )
+
+        source_ids = list(dict.fromkeys(result["sourceIds"]))
+        if any(source_id not in source_titles for source_id in source_ids):
+            raise BedrockResponseException()
+        if result["supported"] and not source_ids:
+            raise BedrockResponseException()
+
+        response = CareerChatResponse(
+            response=result["response"],
+            supported=result["supported"],
+            sources=[
+                CareerChatSourceReference(
+                    sourceId=source_id,
+                    title=source_titles[source_id],
+                )
+                for source_id in source_ids
+            ],
+            model=result["model"],
+            tokensUsed=result["tokensUsed"],
+        )
+        return response.model_dump(by_alias=True)
 
     async def _invoke_for_contract(
         self,
@@ -330,7 +459,11 @@ class BedrockService:
     ) -> dict[str, Any]:
         """Invoke Bedrock and validate the merged response contract."""
 
-        result = await self.invoke_claude_structured(system_prompt, user_prompt)
+        result = await self.invoke_claude_structured(
+            system_prompt,
+            user_prompt,
+            response_model,
+        )
         candidate = {
             **result["data"],
             "model": result["model"],
@@ -383,6 +516,73 @@ class BedrockService:
         """Serialize user data consistently for inclusion in a prompt."""
 
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+    @classmethod
+    def _build_output_config(
+        cls,
+        response_model: type[AIResponse],
+    ) -> dict[str, Any]:
+        """Build a Bedrock Converse JSON Schema output configuration."""
+
+        schema = response_model.model_json_schema(by_alias=True)
+        properties = schema.get("properties", {})
+        if isinstance(properties, dict):
+            properties.pop("model", None)
+            properties.pop("tokensUsed", None)
+        required = schema.get("required")
+        if isinstance(required, list):
+            schema["required"] = [
+                item for item in required if item not in {"model", "tokensUsed"}
+            ]
+
+        sanitized_schema = cls._sanitize_bedrock_schema(schema)
+        schema_name = response_model.__name__.removesuffix("Response").lower()
+        return {
+            "textFormat": {
+                "type": "json_schema",
+                "structure": {
+                    "jsonSchema": {
+                        "schema": json.dumps(
+                            sanitized_schema,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                        "name": schema_name[:64],
+                        "description": (
+                            f"Structured output for {response_model.__name__}"
+                        ),
+                    }
+                },
+            }
+        }
+
+    @classmethod
+    def _sanitize_bedrock_schema(cls, value: Any) -> Any:
+        """Remove JSON Schema keywords unsupported by Bedrock grammars."""
+
+        unsupported_keywords = {
+            "default",
+            "examples",
+            "exclusiveMaximum",
+            "exclusiveMinimum",
+            "maxItems",
+            "maxLength",
+            "maximum",
+            "minLength",
+            "minimum",
+            "multipleOf",
+            "pattern",
+            "title",
+        }
+        if isinstance(value, dict):
+            return {
+                key: cls._sanitize_bedrock_schema(item)
+                for key, item in value.items()
+                if key not in unsupported_keywords
+            }
+        if isinstance(value, list):
+            return [cls._sanitize_bedrock_schema(item) for item in value]
+        return value
 
 
 @lru_cache(maxsize=1)

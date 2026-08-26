@@ -12,6 +12,7 @@ from app.services.bedrock_service import (
     create_bedrock_runtime_client,
 )
 from app.services.rag_service import RAGService, get_default_rag_service
+from app.services.resume_service import ResumeOptimizationService
 
 
 @lru_cache(maxsize=1)
@@ -64,5 +65,24 @@ def get_rag_service(request: Request) -> RAGService:
     return get_default_rag_service()
 
 
+def get_resume_optimization_service(
+    bedrock_service: Annotated[BedrockService, Depends(get_bedrock_service)],
+) -> ResumeOptimizationService:
+    """Build the resume PDF orchestration service for a request.
+
+    Args:
+        bedrock_service: Injected structured Bedrock integration.
+
+    Returns:
+        ResumeOptimizationService: Resume extraction and generation service.
+    """
+
+    return ResumeOptimizationService(bedrock_service=bedrock_service)
+
+
 BedrockServiceDependency = Annotated[BedrockService, Depends(get_bedrock_service)]
 RAGServiceDependency = Annotated[RAGService, Depends(get_rag_service)]
+ResumeOptimizationServiceDependency = Annotated[
+    ResumeOptimizationService,
+    Depends(get_resume_optimization_service),
+]

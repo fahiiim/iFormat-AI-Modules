@@ -1,0 +1,167 @@
+name: Test and deploy to EC2
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iformat-ai-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install --requirement requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build Docker image
+        run: docker build --pull --tag iformat-ai:ci .
+
+  deploy:
+    name: Deploy to EC2
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ubuntu
+      DEPLOY_ARCHIVE: iformat-ai-${{ github.sha }}-${{ github.run_id }}.tar.gz
+      RELEASE_ID: ${{ github.sha }}-${{ github.run_id }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate EC2 configuration
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$EC2_HOST" ]; then
+            echo "Set the production secret EC2_HOST to the EC2 public IP." >&2
+            exit 1
+          fi
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "Set the production secret EC2_SSH_PRIVATE_KEY." >&2
+            exit 1
+          fi
+
+      - name: Configure SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > "$HOME/.ssh/iformat-ec2.pem"
+          chmod 600 "$HOME/.ssh/iformat-ec2.pem"
+          ssh-keyscan -T 15 -H "$EC2_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Create private runtime environment
+        env:
+          BEDROCK_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          BEDROCK_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -z "$BEDROCK_ACCESS_KEY_ID" ] || [ -z "$BEDROCK_SECRET_ACCESS_KEY" ]; then
+            echo "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required." >&2
+            exit 1
+          fi
+          umask 077
+          {
+            printf 'AWS_REGION=%s\n' 'eu-west-1'
+            printf 'BEDROCK_MODEL_ID=%s\n' 'zai.glm-4.7-flash'
+            printf 'AWS_ACCESS_KEY_ID=%s\n' "$BEDROCK_ACCESS_KEY_ID"
+            printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$BEDROCK_SECRET_ACCESS_KEY"
+          } > .env.production
+
+      - name: Package application
+        run: |
+          tar -czf "$DEPLOY_ARCHIVE" \
+            app \
+            Dockerfile \
+            .dockerignore \
+            compose.yaml \
+            requirements.txt
+
+      - name: Upload release to EC2
+        run: |
+          scp -i "$HOME/.ssh/iformat-ec2.pem" \
+            "$DEPLOY_ARCHIVE" \
+            .env.production \
+            "$EC2_USER@$EC2_HOST:/tmp/"
+
+      - name: Start release on EC2
+        run: |
+          ssh -i "$HOME/.ssh/iformat-ec2.pem" "$EC2_USER@$EC2_HOST" \
+            "DEPLOY_ARCHIVE='$DEPLOY_ARCHIVE' RELEASE_ID='$RELEASE_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+
+          APP_ROOT="$HOME/iformat-ai"
+          RELEASE_DIR="$APP_ROOT/releases/$RELEASE_ID"
+          ENV_FILE="$APP_ROOT/.env.production"
+
+          command -v docker >/dev/null
+          docker compose version >/dev/null
+
+          mkdir -p "$RELEASE_DIR"
+          tar -xzf "/tmp/$DEPLOY_ARCHIVE" -C "$RELEASE_DIR"
+          mv /tmp/.env.production "$ENV_FILE"
+          chmod 600 "$ENV_FILE"
+
+          cd "$RELEASE_DIR"
+          IFORMAT_ENV_FILE="$ENV_FILE" docker compose \
+            --project-name iformat-ai \
+            up --detach --build --force-recreate --remove-orphans
+
+          healthy=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8010/health >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$healthy" != "true" ]; then
+            docker compose --project-name iformat-ai logs --tail=100
+            exit 1
+          fi
+
+          ln -sfn "$RELEASE_DIR" "$APP_ROOT/current"
+          rm -f "/tmp/$DEPLOY_ARCHIVE"
+          REMOTE
+
+      - name: Verify public endpoint
+        run: curl --fail --show-error --silent "http://$EC2_HOST:8010/health"
+
+      - name: Publish deployment address
+        run: |
+          {
+            echo "## EC2 deployment complete"
+            echo ""
+            echo "- API: http://$EC2_HOST:8010"
+            echo "- Swagger UI: http://$EC2_HOST:8010/docs"
+            echo "- Health: http://$EC2_HOST:8010/health"
+          } >> "$GITHUB_STEP_SUMMARY"

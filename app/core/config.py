@@ -31,7 +31,6 @@ class Settings(BaseSettings):
         default=None,
         description="Optional token for temporary AWS credentials.",
     )
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

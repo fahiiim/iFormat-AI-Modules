@@ -405,3 +405,18 @@ async def test_bedrock_throttling_returns_standardized_503(app: FastAPI) -> None
             "message": "Amazon Bedrock is temporarily unavailable. Please retry.",
         }
     }
+
+
+@pytest.mark.asyncio
+async def test_health_check_is_public() -> None:
+    """The EC2 and Docker health endpoint should be publicly reachable."""
+
+    application = create_application()
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="http://test",
+    ) as test_client:
+        response = await test_client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

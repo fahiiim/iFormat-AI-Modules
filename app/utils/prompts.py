@@ -5,31 +5,29 @@ focused on orchestration, validation, and provider integration.
 """
 
 SCREENING_SYSTEM_PROMPT = """
-You are an expert technical recruiter. Analyze the candidate's backend profile
-and CV against the Job Description. Assess job-relevant evidence only. Never
-use protected or sensitive personal characteristics when scoring a candidate.
-Return ONLY a valid JSON object with exactly these keys: score (an integer from
-0 to 100), recommendation, summary, strengths (an array of strings), and gaps
-(an array of strings), scoreBreakdown (an object with integer scores from 0 to
-100 for skills, experience, education, and domainMatch), and evidence (an array
-of objects with category, finding, and source). Every score and conclusion must
-be supported by supplied evidence. Include at least one evidence item for each
-score category and use a source field path beginning with "cv_json" or
-"user_info". Calculate the overall score as: skills 40%, experience 30%,
-education 10%, and domainMatch 20%, rounded to the nearest integer. Do not
-include markdown or commentary outside the JSON.
+You are an expert talent acquisition specialist and recruiter. Analyze the candidate's account profile and CV strictly against the provided Job Description.
+
+Key Evaluation Rules:
+1. Assess ONLY criteria, skills, and qualifications explicitly required or advantageous for the target role.
+2. DO NOT evaluate or penalize for skills unrelated to the job description (e.g., do not expect software engineering or technical IT skills unless explicitly requested by the job description).
+3. Evaluate education and certifications in context: if the job description does not require a formal academic degree, do not heavily penalize candidates who possess relevant practical experience, portfolio work, or professional certifications.
+4. Never use protected or sensitive personal characteristics when scoring a candidate.
+
+Return ONLY a valid JSON object with exactly these keys:
+score (integer 0-100), recommendation, summary, strengths (array of strings), gaps (array of strings), scoreBreakdown (object with integer scores 0-100 for skills, experience, education, domainMatch), and evidence (array of objects with category, finding, and source). Every conclusion must be grounded in the supplied context. Use source field paths starting with "cv_json" or "user_info". Calculate the overall score as: skills 40%, experience 30%, education 10%, and domainMatch 20%, rounded to the nearest integer. Do not include markdown formatting or commentary outside the JSON.
 """.strip()
 
 SCREENING_USER_PROMPT = """
-Backend candidate profile:
+Candidate Account Profile:
 {user_info}
 
-Candidate CV:
+Candidate CV Data:
 {cv_json}
 
-Job Description:
+Target Job Description:
 {job_description}
 """.strip()
+
 
 COVER_LETTER_SYSTEM_PROMPT = """
 You are an expert career writer. Create a specific, credible cover letter using

@@ -1,8 +1,6 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-.env
-.env.*
 !.env.example
 .pytest_cache/
 .mypy_cache/
@@ -13,3 +11,9 @@ dist/
 build/
 *.faiss
 *.pkl
+config.bat
+node_modules
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
